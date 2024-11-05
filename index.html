@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <!-- Leaflet.markercluster CSS and JS (Optional for clustering) -->
+    <!--
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster-src.js"></script>
+    -->
     <style>
         #map { height: 600px; width: 100%; }
         body { font-family: Arial, sans-serif; }
@@ -39,11 +45,19 @@
 <body>
 
 <h2>Business Map with Google Sheets</h2>
+<label for="regionSelect">Select Region:</label>
+<select id="regionSelect">
+    <option value="">--Select Region--</option>
+    <!-- Options will be populated dynamically -->
+</select>
 <div id="map"></div>
 
 <script>
     // Replace with your Web App URL
     var scriptURL = 'https://script.google.com/macros/s/AKfycbwZP1gzceLMjSCzpNMS1biHrMNf4mxJPTZIhqPQ7Aai2Q47S032HfUcsVB7dulqTAKT/exec';
+
+    // List of regions
+    var regions = ['West', 'Southwest', 'Midwest', 'Southeast', 'Northeast'];
 
     // Initialize the map
     var map = L.map('map').setView([39.8283, -98.5795], 4); // Centered on USA
@@ -70,26 +84,66 @@
         popupAnchor: [0, -32]
     });
 
-    // Fetch data from Google Sheets
-    fetch(scriptURL + '?action=getData')
-        .then(response => response.json())
-        .then(data => addMarkers(data))
-        .catch(error => console.error('Error:', error));
+    // Populate the region selector
+    var regionSelect = document.getElementById('regionSelect');
+    regions.forEach(function(region) {
+        var option = document.createElement('option');
+        option.value = region;
+        option.textContent = region;
+        regionSelect.appendChild(option);
+    });
+
+    regionSelect.addEventListener('change', function() {
+        var selectedRegion = this.value;
+        if (selectedRegion) {
+            loadRegionData(selectedRegion);
+        } else {
+            // Clear map if no region is selected
+            clearMap();
+        }
+    });
+
+    // Function to load data for the selected region
+    function loadRegionData(region) {
+        clearMap(); // Clear existing markers
+        fetch(scriptURL + '?action=getData&region=' + encodeURIComponent(region))
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    addMarkers(data, region);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+    }
+
+    // Function to clear all markers from the map
+    function clearMap() {
+        for (var key in markers) {
+            if (markers.hasOwnProperty(key)) {
+                map.removeLayer(markers[key]);
+            }
+        }
+        markers = {};
+    }
 
     // Function to add markers to the map
-    function addMarkers(data) {
+    function addMarkers(data, region) {
         data.forEach(function(row) {
             var lat = parseFloat(row.latitude);
             var lon = parseFloat(row.longitude);
 
             if (!isNaN(lat) && !isNaN(lon)) {
-                var markerIcon = row.status === 'Contacted' ? greenIcon : redIcon;
+                var status = row.status || 'Not Contacted';
+                var markerIcon = status === 'Contacted' ? greenIcon : redIcon;
                 var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
 
                 // Store data in marker options
-                marker.options.status = row.status || 'Not Contacted';
+                marker.options.status = status;
                 marker.options.notes = row.notes || '';
                 marker.options.place_id = row.place_id;
+                marker.options.region = region;
 
                 // Popup content
                 var popupContent = '<div class="popup-content">' +
@@ -133,11 +187,18 @@
                 });
             }
         });
+
+        // Adjust map view to fit markers
+        if (Object.keys(markers).length > 0) {
+            var group = new L.featureGroup(Object.values(markers));
+            map.fitBounds(group.getBounds());
+        }
     }
 
     // Function to toggle contact status
     function toggleContactStatus(marker, button, statusText) {
         var place_id = marker.options.place_id;
+        var region = marker.options.region;
         var newStatus = marker.options.status === 'Not Contacted' ? 'Contacted' : 'Not Contacted';
         marker.options.status = newStatus;
         button.textContent = newStatus === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted';
@@ -145,7 +206,7 @@
         marker.setIcon(newStatus === 'Contacted' ? greenIcon : redIcon);
 
         // Update status in Google Sheets
-        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&status=' + encodeURIComponent(newStatus);
+        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&status=' + encodeURIComponent(newStatus) + '&region=' + encodeURIComponent(region);
         fetch(url)
             .then(response => {
                 if (!response.ok) {
@@ -162,6 +223,7 @@
     // Function to save notes
     function saveNotes(marker, notesArea) {
         var place_id = marker.options.place_id;
+        var region = marker.options.region;
         var notes = notesArea.value;
         marker.options.notes = notes;
 
@@ -170,7 +232,7 @@
         saveButton.disabled = true;
 
         // Update notes in Google Sheets
-        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&notes=' + encodeURIComponent(notes);
+        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&notes=' + encodeURIComponent(notes) + '&region=' + encodeURIComponent(region);
         fetch(url)
             .then(response => {
                 if (!response.ok) {
