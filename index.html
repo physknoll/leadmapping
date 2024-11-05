@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Business Map with Google Sheets</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        #map { height: 600px; width: 100%; }
+        body { font-family: Arial, sans-serif; }
+        .popup-content {
+            width: 200px;
+        }
+        .contact-button {
+            margin-top: 10px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .contacted {
+            background-color: green;
+            color: white;
+        }
+        .not-contacted {
+            background-color: red;
+            color: white;
+        }
+        .notes-area {
+            width: 100%;
+            height: 60px;
+        }
+        .copy-button {
+            margin-top: 5px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Business Map with Google Sheets</h2>
+<div id="map"></div>
+
+<script>
+    // Replace with your Web App URL
+    var scriptURL = 'https://script.google.com/a/macros/rockrobotic.com/s/AKfycbwZP1gzceLMjSCzpNMS1biHrMNf4mxJPTZIhqPQ7Aai2Q47S032HfUcsVB7dulqTAKT/exec';
+
+    // Initialize the map
+    var map = L.map('map').setView([39.8283, -98.5795], 4); // Centered on USA
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    // Marker storage
+    var markers = {};
+
+    // Custom Icons
+    var redIcon = new L.Icon({
+        iconUrl: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -32]
+    });
+    var greenIcon = new L.Icon({
+        iconUrl: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png',
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -32]
+    });
+
+    // Fetch data from Google Sheets
+    fetch(scriptURL + '?action=getData')
+        .then(response => response.json())
+        .then(data => addMarkers(data))
+        .catch(error => console.error('Error:', error));
+
+    // Function to add markers to the map
+    function addMarkers(data) {
+        data.forEach(function(row) {
+            var lat = parseFloat(row.latitude);
+            var lon = parseFloat(row.longitude);
+
+            if (!isNaN(lat) && !isNaN(lon)) {
+                var markerIcon = row.status === 'Contacted' ? greenIcon : redIcon;
+                var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
+
+                // Store status in marker options
+                marker.options.status = row.status;
+
+                // Popup content
+                var popupContent = '<div class="popup-content">' +
+                    '<b>' + row.name + '</b><br>' +
+                    row.full_address + '<br>' +
+                    'Phone: <a href="tel:' + row.phone + '">' + row.phone + '</a><br>' +
+                    '<button class="copy-button" data-phone="' + row.phone + '">Copy Phone Number</button><br>' +
+                    'Status: ' + row.status + '<br>' +
+                    '<button class="contact-button">' + (row.status === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted') + '</button><br>' +
+                    'Notes:<br>' +
+                    '<textarea class="notes-area">' + (row.notes || '') + '</textarea><br>' +
+                    '<button class="save-button">Save</button>' +
+                    '</div>';
+
+                marker.bindPopup(popupContent);
+
+                // Store marker with unique ID (e.g., place_id)
+                markers[row.place_id] = marker;
+
+                // Event listener for popup open
+                marker.on('popupopen', function(e) {
+                    var container = e.popup._contentNode;
+
+                    var button = container.querySelector('.contact-button');
+                    var saveButton = container.querySelector('.save-button');
+                    var notesArea = container.querySelector('.notes-area');
+                    var copyButton = container.querySelector('.copy-button');
+
+                    button.addEventListener('click', function() {
+                        toggleContactStatus(marker, button, row.place_id);
+                    });
+
+                    saveButton.addEventListener('click', function() {
+                        saveNotes(row.place_id, notesArea.value);
+                    });
+
+                    copyButton.addEventListener('click', function() {
+                        copyToClipboard(row.phone);
+                    });
+                });
+            }
+        });
+    }
+
+    // Function to toggle contact status
+    function toggleContactStatus(marker, button, place_id) {
+        var newStatus = marker.options.status === 'Not Contacted' ? 'Contacted' : 'Not Contacted';
+        marker.options.status = newStatus;
+        button.textContent = newStatus === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted';
+        marker.setIcon(newStatus === 'Contacted' ? greenIcon : redIcon);
+
+        // Update status in Google Sheets
+        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&status=' + encodeURIComponent(newStatus);
+        fetch(url)
+            .then(response => response.text())
+            .then(data => console.log(data))
+            .catch(error => console.error('Error:', error));
+    }
+
+    // Function to save notes
+    function saveNotes(place_id, notes) {
+        var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&notes=' + encodeURIComponent(notes);
+        fetch(url)
+            .then(response => response.text())
+            .then(data => alert('Notes saved'))
+            .catch(error => console.error('Error:', error));
+    }
+
+    // Function to copy phone number to clipboard
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(function() {
+            alert('Phone number copied to clipboard');
+        }, function(err) {
+            console.error('Could not copy text: ', err);
+        });
+    }
+</script>
+
+</body>
+</html>
