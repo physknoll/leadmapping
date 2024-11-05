@@ -11,10 +11,10 @@
         #map { height: 600px; width: 100%; }
         body { font-family: Arial, sans-serif; }
         .popup-content {
-            width: 200px;
+            width: 250px;
         }
-        .contact-button {
-            margin-top: 10px;
+        .contact-button, .save-button, .copy-button {
+            margin-top: 5px;
             padding: 5px 10px;
             cursor: pointer;
         }
@@ -29,11 +29,10 @@
         .notes-area {
             width: 100%;
             height: 60px;
+            resize: vertical;
         }
-        .copy-button {
-            margin-top: 5px;
-            padding: 5px 10px;
-            cursor: pointer;
+        .status-text {
+            font-weight: bold;
         }
     </style>
 </head>
@@ -87,8 +86,10 @@
                 var markerIcon = row.status === 'Contacted' ? greenIcon : redIcon;
                 var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
 
-                // Store status in marker options
-                marker.options.status = row.status;
+                // Store data in marker options
+                marker.options.status = row.status || 'Not Contacted';
+                marker.options.notes = row.notes || '';
+                marker.options.place_id = row.place_id;
 
                 // Popup content
                 var popupContent = '<div class="popup-content">' +
@@ -96,10 +97,10 @@
                     row.full_address + '<br>' +
                     'Phone: <a href="tel:' + row.phone + '">' + row.phone + '</a><br>' +
                     '<button class="copy-button" data-phone="' + row.phone + '">Copy Phone Number</button><br>' +
-                    'Status: ' + row.status + '<br>' +
-                    '<button class="contact-button">' + (row.status === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted') + '</button><br>' +
+                    'Status: <span class="status-text">' + marker.options.status + '</span><br>' +
+                    '<button class="contact-button">' + (marker.options.status === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted') + '</button><br>' +
                     'Notes:<br>' +
-                    '<textarea class="notes-area">' + (row.notes || '') + '</textarea><br>' +
+                    '<textarea class="notes-area">' + marker.options.notes + '</textarea><br>' +
                     '<button class="save-button">Save</button>' +
                     '</div>';
 
@@ -116,13 +117,14 @@
                     var saveButton = container.querySelector('.save-button');
                     var notesArea = container.querySelector('.notes-area');
                     var copyButton = container.querySelector('.copy-button');
+                    var statusText = container.querySelector('.status-text');
 
                     button.addEventListener('click', function() {
-                        toggleContactStatus(marker, button, row.place_id);
+                        toggleContactStatus(marker, button, statusText);
                     });
 
                     saveButton.addEventListener('click', function() {
-                        saveNotes(row.place_id, notesArea.value);
+                        saveNotes(marker, notesArea);
                     });
 
                     copyButton.addEventListener('click', function() {
@@ -134,27 +136,56 @@
     }
 
     // Function to toggle contact status
-    function toggleContactStatus(marker, button, place_id) {
+    function toggleContactStatus(marker, button, statusText) {
+        var place_id = marker.options.place_id;
         var newStatus = marker.options.status === 'Not Contacted' ? 'Contacted' : 'Not Contacted';
         marker.options.status = newStatus;
         button.textContent = newStatus === 'Contacted' ? 'Mark as Not Contacted' : 'Mark as Contacted';
+        statusText.textContent = newStatus;
         marker.setIcon(newStatus === 'Contacted' ? greenIcon : redIcon);
 
         // Update status in Google Sheets
         var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&status=' + encodeURIComponent(newStatus);
         fetch(url)
-            .then(response => response.text())
-            .then(data => console.log(data))
-            .catch(error => console.error('Error:', error));
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok ' + response.statusText);
+                }
+                return response.text();
+            })
+            .then(data => console.log('Status updated'))
+            .catch(error => {
+                alert('There was a problem updating the status: ' + error.message);
+            });
     }
 
     // Function to save notes
-    function saveNotes(place_id, notes) {
+    function saveNotes(marker, notesArea) {
+        var place_id = marker.options.place_id;
+        var notes = notesArea.value;
+        marker.options.notes = notes;
+
+        // Disable the save button to prevent multiple clicks
+        var saveButton = notesArea.parentElement.querySelector('.save-button');
+        saveButton.disabled = true;
+
+        // Update notes in Google Sheets
         var url = scriptURL + '?action=updateData&place_id=' + encodeURIComponent(place_id) + '&notes=' + encodeURIComponent(notes);
         fetch(url)
-            .then(response => response.text())
-            .then(data => alert('Notes saved'))
-            .catch(error => console.error('Error:', error));
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok ' + response.statusText);
+                }
+                return response.text();
+            })
+            .then(data => {
+                alert('Notes saved');
+                saveButton.disabled = false;
+            })
+            .catch(error => {
+                alert('There was a problem saving the notes: ' + error.message);
+                saveButton.disabled = false;
+            });
     }
 
     // Function to copy phone number to clipboard
